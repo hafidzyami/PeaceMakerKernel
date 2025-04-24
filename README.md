@@ -1,3 +1,6 @@
+# Fork from https://github.com/D4stiny/PeaceMaker
+Fixed some build error, merge ImageHistoryFilter and ThreadFilter to ImageFilter, merge TamperGuard and RegistryFilter to ObjectFilter, remove GUI and FSFilter (MiniFilter)
+
 # PeaceMaker Threat Detection
 PeaceMaker Threat Detection is a kernel-mode utility designed to detect a variety of methods commonly used in advanced forms of malware. Compared to a stereotypical anti-virus that may detect via hashes or patterns, PeaceMaker targets the techniques malware commonly uses in order to catch them in the act. Furthermore, PeaceMaker is designed to provide an incredible amount of detail when a malicious technique is detected, allowing for effective containment and response.
 
