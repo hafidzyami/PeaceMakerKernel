@@ -1,0 +1,116 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Driver Files">
+      <UniqueIdentifier>{8E41214B-6785-4CFE-B992-037D68949A14}</UniqueIdentifier>
+      <Extensions>inf;inv;inx;mof;mc;</Extensions>
+    </Filter>
+    <Filter Include="Header Files\Filters">
+      <UniqueIdentifier>{e51791fd-6d37-4d03-af6a-4cf1d58ff83a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Filters">
+      <UniqueIdentifier>{07baa70a-638f-458b-a11e-cc54d633a0f5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Utilities">
+      <UniqueIdentifier>{d2416d0a-1b1f-400a-a990-1af1d2a15b4b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Utilities">
+      <UniqueIdentifier>{b653583e-a15b-446e-85e9-7f8cceecae8c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core">
+      <UniqueIdentifier>{67667525-d9bd-4041-8ca5-f90fe95a4741}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core">
+      <UniqueIdentifier>{bbb90d1c-ab67-44c2-a036-5847843b131f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+    <ResourceCompile Include="PeaceMaker Kernel.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="FilterTesting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="common.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RegistryFilter.cpp">
+      <Filter>Source Files\Filters</Filter>
+    </ClCompile>
+    <ClCompile Include="StackWalker.cpp">
+      <Filter>Source Files\Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageHistoryFilter.cpp">
+      <Filter>Source Files\Filters</Filter>
+    </ClCompile>
+    <ClCompile Include="StringFilters.cpp">
+      <Filter>Source Files\Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="DetectionLogic.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="IOCTLCommunication.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="AlertQueue.cpp">
+      <Filter>Source Files\Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="ThreadFilter.cpp">
+      <Filter>Source Files\Filters</Filter>
+    </ClCompile>
+    <ClCompile Include="TamperGuard.cpp">
+      <Filter>Source Files\Filters</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RegistryFilter.h">
+      <Filter>Header Files\Filters</Filter>
+    </ClInclude>
+    <ClInclude Include="StackWalker.h">
+      <Filter>Header Files\Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="ntdef.h">
+      <Filter>Header Files\Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="ImageHistoryFilter.h">
+      <Filter>Header Files\Filters</Filter>
+    </ClInclude>
+    <ClInclude Include="StringFilters.h">
+      <Filter>Header Files\Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="AlertQueue.h">
+      <Filter>Header Files\Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="shared.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DetectionLogic.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="IOCTLCommunication.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ThreadFilter.h">
+      <Filter>Header Files\Filters</Filter>
+    </ClInclude>
+    <ClInclude Include="TamperGuard.h">
+      <Filter>Header Files\Filters</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
