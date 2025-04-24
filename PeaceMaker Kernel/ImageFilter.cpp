@@ -1,71 +1,91 @@
-/*
- * This file is subject to the terms and conditions defined in
- * file 'LICENSE', which is part of this source code package.
- * 
- * COPYRIGHT Bill Demirkapi 2020
- */
-#include "ImageHistoryFilter.h"
+#include "ImageFilter.h"
 
-StackWalker ImageHistoryFilter::walker;
-PPROCESS_HISTORY_ENTRY ImageHistoryFilter::ProcessHistoryHead;
-EX_PUSH_LOCK ImageHistoryFilter::ProcessHistoryLock;
-BOOLEAN ImageHistoryFilter::destroying;
-ULONG64 ImageHistoryFilter::ProcessHistorySize;
-PDETECTION_LOGIC ImageHistoryFilter::detector;
+// Initialize static member variables
+StackWalker ImageFilter::walker;
+PPROCESS_HISTORY_ENTRY ImageFilter::ProcessHistoryHead;
+EX_PUSH_LOCK ImageFilter::ProcessHistoryLock;
+BOOLEAN ImageFilter::destroying;
+ULONG64 ImageFilter::ProcessHistorySize;
+PDETECTION_LOGIC ImageFilter::detector;
 
 /**
 	Register the necessary notify routines.
 	@param Detector - Detection instance used to analyze untrusted operations.
 	@param InitializeStatus - Status of initialization.
 */
-ImageHistoryFilter::ImageHistoryFilter (
+ImageFilter::ImageFilter (
 	_In_ PDETECTION_LOGIC Detector,
 	_Out_ NTSTATUS* InitializeStatus
 	)
 {
+	NTSTATUS tempStatus = STATUS_SUCCESS;
+	
+	//
+	// Initialize process history components
+	//
+	
 	//
 	// Set the create process notify routine.
 	//
-	*InitializeStatus = PsSetCreateProcessNotifyRoutineEx(ImageHistoryFilter::CreateProcessNotifyRoutine, FALSE);
-	if (NT_SUCCESS(*InitializeStatus) == FALSE)
+	tempStatus = PsSetCreateProcessNotifyRoutineEx(ImageFilter::CreateProcessNotifyRoutine, FALSE);
+	if (NT_SUCCESS(tempStatus) == FALSE)
 	{
-		DBGPRINT("ImageHistoryFilter!ImageHistoryFilter: Failed to register create process notify routine with status 0x%X.", *InitializeStatus);
+		DBGPRINT("ImageFilter!ImageFilter: Failed to register create process notify routine with status 0x%X.", tempStatus);
+		*InitializeStatus = tempStatus;
 		return;
 	}
 	
 	//
 	// Set the load image notify routine.
 	//
-	*InitializeStatus = PsSetLoadImageNotifyRoutine(ImageHistoryFilter::LoadImageNotifyRoutine);
-	if (NT_SUCCESS(*InitializeStatus) == FALSE)
+	tempStatus = PsSetLoadImageNotifyRoutine(ImageFilter::LoadImageNotifyRoutine);
+	if (NT_SUCCESS(tempStatus) == FALSE)
 	{
-		DBGPRINT("ImageHistoryFilter!ImageHistoryFilter: Failed to register load image notify routine with status 0x%X.", *InitializeStatus);
+		DBGPRINT("ImageFilter!ImageFilter: Failed to register load image notify routine with status 0x%X.", tempStatus);
+		*InitializeStatus = tempStatus;
 		return;
 	}
 
-	FltInitializePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltInitializePushLock(&ImageFilter::ProcessHistoryLock);
 
-	ImageHistoryFilter::ProcessHistoryHead = RCAST<PPROCESS_HISTORY_ENTRY>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(PROCESS_HISTORY_ENTRY), PROCESS_HISTORY_TAG));
-	if (ImageHistoryFilter::ProcessHistoryHead == NULL)
+	ImageFilter::ProcessHistoryHead = RCAST<PPROCESS_HISTORY_ENTRY>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(PROCESS_HISTORY_ENTRY), PROCESS_HISTORY_TAG));
+	if (ImageFilter::ProcessHistoryHead == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!ImageHistoryFilter: Failed to allocate the process history head.");
+		DBGPRINT("ImageFilter!ImageFilter: Failed to allocate the process history head.");
 		*InitializeStatus = STATUS_NO_MEMORY;
 		return;
 	}
-	memset(ImageHistoryFilter::ProcessHistoryHead, 0, sizeof(PROCESS_HISTORY_ENTRY));
-	InitializeListHead(RCAST<PLIST_ENTRY>(ImageHistoryFilter::ProcessHistoryHead));
+	memset(ImageFilter::ProcessHistoryHead, 0, sizeof(PROCESS_HISTORY_ENTRY));
+	InitializeListHead(RCAST<PLIST_ENTRY>(ImageFilter::ProcessHistoryHead));
 	this->ProcessHistorySize = 0;
 
 	//
 	// Set the detector.
 	//
-	ImageHistoryFilter::detector = Detector;
+	ImageFilter::detector = Detector;
+	
+	//
+	// Initialize thread filter components
+	//
+	
+	//
+	// Create a thread notify routine.
+	//
+	tempStatus = PsSetCreateThreadNotifyRoutine(ImageFilter::ThreadNotifyRoutine);
+	if (NT_SUCCESS(tempStatus) == FALSE)
+	{
+		DBGPRINT("ImageFilter!ImageFilter: Failed to create thread notify routine with status 0x%X.", tempStatus);
+		*InitializeStatus = tempStatus;
+		return;
+	}
+	
+	*InitializeStatus = STATUS_SUCCESS;
 }
 
 /**
-	Clean up the process history linked-list.
+	Clean up and remove notify routines.
 */
-ImageHistoryFilter::~ImageHistoryFilter (
+ImageFilter::~ImageFilter (
 	VOID
 	)
 {
@@ -75,37 +95,38 @@ ImageHistoryFilter::~ImageHistoryFilter (
 	//
 	// Set destroying to TRUE so that no other threads can get a lock.
 	//
-	ImageHistoryFilter::destroying = TRUE;
+	ImageFilter::destroying = TRUE;
 
 	//
-	// Remove the notify routines.
+	// Remove all notify routines.
 	//
-	PsSetCreateProcessNotifyRoutineEx(ImageHistoryFilter::CreateProcessNotifyRoutine, TRUE);
-	PsRemoveLoadImageNotifyRoutine(ImageHistoryFilter::LoadImageNotifyRoutine);
+	PsSetCreateProcessNotifyRoutineEx(ImageFilter::CreateProcessNotifyRoutine, TRUE);
+	PsRemoveLoadImageNotifyRoutine(ImageFilter::LoadImageNotifyRoutine);
+	PsRemoveCreateThreadNotifyRoutine(ImageFilter::ThreadNotifyRoutine);
 
 	//
 	// Acquire an exclusive lock to push out other threads.
 	//
-	FltAcquirePushLockExclusive(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockExclusive(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Delete the lock for the process history linked-list.
 	//
-	FltDeletePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltDeletePushLock(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Go through each process history and free it.
 	//
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		while (IsListEmpty(RCAST<PLIST_ENTRY>(ImageHistoryFilter::ProcessHistoryHead)) == FALSE)
+		while (IsListEmpty(RCAST<PLIST_ENTRY>(ImageFilter::ProcessHistoryHead)) == FALSE)
 		{
-			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(RemoveHeadList(RCAST<PLIST_ENTRY>(ImageHistoryFilter::ProcessHistoryHead)));
+			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(RemoveHeadList(RCAST<PLIST_ENTRY>(ImageFilter::ProcessHistoryHead)));
 			//
 			// Clear the images linked-list.
 			//
@@ -177,7 +198,7 @@ ImageHistoryFilter::~ImageHistoryFilter (
 		//
 		// Finally, free the list head.
 		//
-		ExFreePoolWithTag(ImageHistoryFilter::ProcessHistoryHead, PROCESS_HISTORY_TAG);
+		ExFreePoolWithTag(ImageFilter::ProcessHistoryHead, PROCESS_HISTORY_TAG);
 	}
 }
 
@@ -187,7 +208,7 @@ ImageHistoryFilter::~ImageHistoryFilter (
 	@param CreateInfo - Information about the process being created.
 */
 VOID
-ImageHistoryFilter::AddProcessToHistory (
+ImageFilter::AddProcessToHistory (
 	_In_ HANDLE ProcessId,
 	_In_ PPS_CREATE_NOTIFY_INFO CreateInfo
 	)
@@ -201,7 +222,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	processHistoryLockHeld = FALSE;
 	status = STATUS_SUCCESS;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return;
 	}
@@ -209,7 +230,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	newProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(PROCESS_HISTORY_ENTRY), PROCESS_HISTORY_TAG));
 	if (newProcessHistory == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!AddProcessToHistory: Failed to allocate space for the process history.");
+		DBGPRINT("ImageFilter!AddProcessToHistory: Failed to allocate space for the process history.");
 		status = STATUS_NO_MEMORY;
 		goto Exit;
 	}
@@ -230,7 +251,6 @@ ImageHistoryFilter::AddProcessToHistory (
 	//
 	// Image file name fields.
 	//
-
 	
 	//
 	// Allocate the necessary space.
@@ -238,7 +258,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	newProcessHistory->ProcessImageFileName = RCAST<PUNICODE_STRING>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(UNICODE_STRING) + CreateInfo->ImageFileName->Length, IMAGE_NAME_TAG));
 	if (newProcessHistory->ProcessImageFileName == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!AddProcessToHistory: Failed to allocate space for process ImageFileName.");
+		DBGPRINT("ImageFilter!AddProcessToHistory: Failed to allocate space for process ImageFileName.");
 		goto Exit;
 	}
 
@@ -259,7 +279,7 @@ ImageHistoryFilter::AddProcessToHistory (
 		newProcessHistory->ProcessCommandLine = RCAST<PUNICODE_STRING>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(UNICODE_STRING) + CreateInfo->CommandLine->Length, IMAGE_COMMMAND_TAG));
 		if (newProcessHistory->ProcessCommandLine == NULL)
 		{
-			DBGPRINT("ImageHistoryFilter!AddProcessToHistory: Failed to allocate space for process command line.");
+			DBGPRINT("ImageFilter!AddProcessToHistory: Failed to allocate space for process command line.");
 			goto Exit;
 		}
 
@@ -275,11 +295,11 @@ ImageHistoryFilter::AddProcessToHistory (
 	//
 	// These fields are optional.
 	//
-	ImageHistoryFilter::GetProcessImageFileName(CreateInfo->ParentProcessId, &newProcessHistory->ParentImageFileName);
+	ImageFilter::GetProcessImageFileName(CreateInfo->ParentProcessId, &newProcessHistory->ParentImageFileName);
 
 	if (PsGetCurrentProcessId() != CreateInfo->ParentProcessId)
 	{
-		ImageHistoryFilter::GetProcessImageFileName(PsGetCurrentProcessId(), &newProcessHistory->CallerImageFileName);
+		ImageFilter::GetProcessImageFileName(PsGetCurrentProcessId(), &newProcessHistory->CallerImageFileName);
 	}
 
 	//
@@ -289,7 +309,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	walker.WalkAndResolveStack(&newProcessHistory->CallerStackHistory, &newProcessHistory->CallerStackHistorySize, STACK_HISTORY_TAG);
 	if (newProcessHistory->CallerStackHistory == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!AddProcessToHistory: Failed to allocate space for the stack history.");
+		DBGPRINT("ImageFilter!AddProcessToHistory: Failed to allocate space for the stack history.");
 		status = STATUS_NO_MEMORY;
 		goto Exit;
 	}
@@ -297,7 +317,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	newProcessHistory->ImageLoadHistory = RCAST<PIMAGE_LOAD_HISTORY_ENTRY>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(IMAGE_LOAD_HISTORY_ENTRY), IMAGE_HISTORY_TAG));
 	if (newProcessHistory->ImageLoadHistory == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!AddProcessToHistory: Failed to allocate space for the image load history.");
+		DBGPRINT("ImageFilter!AddProcessToHistory: Failed to allocate space for the image load history.");
 		status = STATUS_NO_MEMORY;
 		goto Exit;
 	}
@@ -313,17 +333,17 @@ ImageHistoryFilter::AddProcessToHistory (
 	//
 	// Grab a lock to add an entry.
 	//
-	FltAcquirePushLockExclusive(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockExclusive(&ImageFilter::ProcessHistoryLock);
 
-	InsertTailList(RCAST<PLIST_ENTRY>(ImageHistoryFilter::ProcessHistoryHead), RCAST<PLIST_ENTRY>(newProcessHistory));
-	ImageHistoryFilter::ProcessHistorySize++;
+	InsertTailList(RCAST<PLIST_ENTRY>(ImageFilter::ProcessHistoryHead), RCAST<PLIST_ENTRY>(newProcessHistory));
+	ImageFilter::ProcessHistorySize++;
 
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Audit the stack.
 	//
-	ImageHistoryFilter::detector->AuditUserStackWalk(ProcessCreate,
+	ImageFilter::detector->AuditUserStackWalk(ProcessCreate,
 													 newProcessHistory->ProcessId,
 													 newProcessHistory->ParentImageFileName,
 													 newProcessHistory->ProcessImageFileName,
@@ -333,7 +353,7 @@ ImageHistoryFilter::AddProcessToHistory (
 	//
 	// Check for parent process ID spoofing.
 	//
-	ImageHistoryFilter::detector->AuditCallerProcessId(ProcessCreate,
+	ImageFilter::detector->AuditCallerProcessId(ProcessCreate,
 													   PsGetCurrentProcessId(),
 													   CreateInfo->ParentProcessId,
 													   newProcessHistory->ParentImageFileName,
@@ -352,13 +372,13 @@ Exit:
 	@param ProcessId - The process ID of the process being terminated.
 */
 VOID
-ImageHistoryFilter::TerminateProcessInHistory (
+ImageFilter::TerminateProcessInHistory (
 	_In_ HANDLE ProcessId
 	)
 {
 	PPROCESS_HISTORY_ENTRY currentProcessHistory;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return;
 	}
@@ -366,14 +386,14 @@ ImageHistoryFilter::TerminateProcessInHistory (
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Iterate histories for a match.
 	//
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = ImageHistoryFilter::ProcessHistoryHead;
+		currentProcessHistory = ImageFilter::ProcessHistoryHead;
 		do
 		{
 			//
@@ -385,13 +405,13 @@ ImageHistoryFilter::TerminateProcessInHistory (
 				break;
 			}
 			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(currentProcessHistory->ListEntry.Blink);
-		} while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead);
+		} while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead);
 	}
 
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 }
 
 /**
@@ -401,7 +421,7 @@ ImageHistoryFilter::TerminateProcessInHistory (
 	@param CreateInfo - Information about the process being created.
 */
 VOID
-ImageHistoryFilter::CreateProcessNotifyRoutine (
+ImageFilter::CreateProcessNotifyRoutine (
 	_In_ PEPROCESS Process,
 	_In_ HANDLE ProcessId,
 	_In_ PPS_CREATE_NOTIFY_INFO CreateInfo
@@ -413,16 +433,16 @@ ImageHistoryFilter::CreateProcessNotifyRoutine (
 	//
 	if (CreateInfo)
 	{
-		ImageHistoryFilter::AddProcessToHistory(ProcessId, CreateInfo);
-		DBGPRINT("ImageHistoryFilter!CreateProcessNotifyRoutine: Registered process 0x%X.", ProcessId);
+		ImageFilter::AddProcessToHistory(ProcessId, CreateInfo);
+		DBGPRINT("ImageFilter!CreateProcessNotifyRoutine: Registered process 0x%X.", ProcessId);
 	}
 	else
 	{
-		DBGPRINT("ImageHistoryFilter!CreateProcessNotifyRoutine: Terminating process 0x%X.", ProcessId);
+		DBGPRINT("ImageFilter!CreateProcessNotifyRoutine: Terminating process 0x%X.", ProcessId);
 		//
 		// Set the process as "terminated".
 		//
-		ImageHistoryFilter::TerminateProcessInHistory(ProcessId);
+		ImageFilter::TerminateProcessInHistory(ProcessId);
 	}
 }
 
@@ -432,7 +452,7 @@ ImageHistoryFilter::CreateProcessNotifyRoutine (
 	@param ProcessImageFileName - PUNICODE_STRING to fill with the image file name of the process.
 */
 BOOLEAN
-ImageHistoryFilter::GetProcessImageFileName (
+ImageFilter::GetProcessImageFileName (
 	_In_ HANDLE ProcessId,
 	_Inout_ PUNICODE_STRING* ImageFileName
 	)
@@ -452,7 +472,7 @@ ImageHistoryFilter::GetProcessImageFileName (
 	status = PsLookupProcessByProcessId(ProcessId, &processObject);
 	if (NT_SUCCESS(status) == FALSE)
 	{
-		DBGPRINT("ImageHistoryFilter!GetProcessImageFileName: Failed to find process object with status 0x%X.", status);
+		DBGPRINT("ImageFilter!GetProcessImageFileName: Failed to find process object with status 0x%X.", status);
 		goto Exit;
 	}
 
@@ -462,7 +482,7 @@ ImageHistoryFilter::GetProcessImageFileName (
 	status = ObOpenObjectByPointer(processObject, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, GENERIC_ALL, *PsProcessType, KernelMode, &processHandle);
 	if (NT_SUCCESS(status) == FALSE)
 	{
-		DBGPRINT("ImageHistoryFilter!GetProcessImageFileName: Failed to open handle to process with status 0x%X.", status);
+		DBGPRINT("ImageFilter!GetProcessImageFileName: Failed to open handle to process with status 0x%X.", status);
 		goto Exit;
 	}
 
@@ -472,7 +492,7 @@ ImageHistoryFilter::GetProcessImageFileName (
 	status = NtQueryInformationProcess(processHandle, ProcessImageFileName, NULL, 0, &returnLength);
 	if (status != STATUS_INFO_LENGTH_MISMATCH && status != STATUS_BUFFER_TOO_SMALL && status != STATUS_BUFFER_OVERFLOW)
 	{
-		DBGPRINT("ImageHistoryFilter!GetProcessImageFileName: Failed to query size of process ImageFileName with status 0x%X.", status);
+		DBGPRINT("ImageFilter!GetProcessImageFileName: Failed to query size of process ImageFileName with status 0x%X.", status);
 		goto Exit;
 	}
 
@@ -482,7 +502,7 @@ ImageHistoryFilter::GetProcessImageFileName (
 	*ImageFileName = RCAST<PUNICODE_STRING>(ExAllocatePool2(POOL_FLAG_PAGED, returnLength, IMAGE_NAME_TAG));
 	if (*ImageFileName == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!GetProcessImageFileName: Failed to allocate space for process ImageFileName.");
+		DBGPRINT("ImageFilter!GetProcessImageFileName: Failed to allocate space for process ImageFileName.");
 		goto Exit;
 	}
 
@@ -492,7 +512,7 @@ ImageHistoryFilter::GetProcessImageFileName (
 	status = NtQueryInformationProcess(processHandle, ProcessImageFileName, *ImageFileName, returnLength, &returnLength);
 	if (NT_SUCCESS(status) == FALSE)
 	{
-		DBGPRINT("ImageHistoryFilter!GetProcessImageFileName: Failed to query process ImageFileName with status 0x%X.", status);
+		DBGPRINT("ImageFilter!GetProcessImageFileName: Failed to query process ImageFileName with status 0x%X.", status);
 		goto Exit;
 	}
 Exit:
@@ -515,7 +535,7 @@ Exit:
 	@param ImageInfo - Structure containing a variety of properties about the image being loaded.
 */
 VOID
-ImageHistoryFilter::LoadImageNotifyRoutine(
+ImageFilter::LoadImageNotifyRoutine(
 	_In_ PUNICODE_STRING FullImageName,
 	_In_ HANDLE ProcessId,
 	_In_ PIMAGE_INFO ImageInfo
@@ -531,7 +551,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	newImageLoadHistory = NULL;
 	status = STATUS_SUCCESS;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return;
 	}
@@ -539,14 +559,14 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Iterate histories for a match.
 	//
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = ImageHistoryFilter::ProcessHistoryHead;
+		currentProcessHistory = ImageFilter::ProcessHistoryHead;
 		do
 		{
 			if (currentProcessHistory->ProcessId == ProcessId && currentProcessHistory->ProcessTerminated == FALSE)
@@ -554,15 +574,15 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 				break;
 			}
 			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(currentProcessHistory->ListEntry.Blink);
-		} while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead);
+		} while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead);
 	}
 
 	//
 	// This might happen if we load on a running machine that already has processes.
 	//
-	if (currentProcessHistory == NULL || currentProcessHistory == ImageHistoryFilter::ProcessHistoryHead)
+	if (currentProcessHistory == NULL || currentProcessHistory == ImageFilter::ProcessHistoryHead)
 	{
-		DBGPRINT("ImageHistoryFilter!LoadImageNotifyRoutine: Failed to find PID 0x%X in history.", ProcessId);
+		DBGPRINT("ImageFilter!LoadImageNotifyRoutine: Failed to find PID 0x%X in history.", ProcessId);
 		status = STATUS_NOT_FOUND;
 		goto Exit;
 	}
@@ -573,7 +593,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	newImageLoadHistory = RCAST<PIMAGE_LOAD_HISTORY_ENTRY>(ExAllocatePool2(POOL_FLAG_PAGED, sizeof(IMAGE_LOAD_HISTORY_ENTRY), IMAGE_HISTORY_TAG));
 	if (newImageLoadHistory == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!LoadImageNotifyRoutine: Failed to allocate space for the image history entry.");
+		DBGPRINT("ImageFilter!LoadImageNotifyRoutine: Failed to allocate space for the image history entry.");
 		status = STATUS_NO_MEMORY;
 		goto Exit;
 	}
@@ -583,7 +603,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	if (PsGetCurrentProcessId() != ProcessId)
 	{
 		newImageLoadHistory->RemoteImage = TRUE;
-		ImageHistoryFilter::GetProcessImageFileName(PsGetCurrentProcessId(), &newImageLoadHistory->CallerImageFileName);
+		ImageFilter::GetProcessImageFileName(PsGetCurrentProcessId(), &newImageLoadHistory->CallerImageFileName);
 	}
 
 	//
@@ -597,7 +617,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 		newImageLoadHistory->ImageFileName.Buffer = RCAST<PWCH>(ExAllocatePool2(POOL_FLAG_PAGED, SCAST<SIZE_T>(FullImageName->Length) + 2, IMAGE_NAME_TAG));
 		if (newImageLoadHistory->ImageFileName.Buffer == NULL)
 		{
-			DBGPRINT("ImageHistoryFilter!LoadImageNotifyRoutine: Failed to allocate space for the image file name.");
+			DBGPRINT("ImageFilter!LoadImageNotifyRoutine: Failed to allocate space for the image file name.");
 			status = STATUS_NO_MEMORY;
 			goto Exit;
 		}
@@ -611,7 +631,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 		status = RtlStringCbCopyUnicodeString(newImageLoadHistory->ImageFileName.Buffer, SCAST<SIZE_T>(FullImageName->Length) + 2, FullImageName);
 		if (NT_SUCCESS(status) == FALSE)
 		{
-			DBGPRINT("ImageHistoryFilter!LoadImageNotifyRoutine: Failed to copy the image file name with status 0x%X. Destination size = 0x%X, Source Size = 0x%X.", status, SCAST<SIZE_T>(FullImageName->Length) + 2, SCAST<SIZE_T>(FullImageName->Length));
+			DBGPRINT("ImageFilter!LoadImageNotifyRoutine: Failed to copy the image file name with status 0x%X. Destination size = 0x%X, Source Size = 0x%X.", status, SCAST<SIZE_T>(FullImageName->Length) + 2, SCAST<SIZE_T>(FullImageName->Length));
 			goto Exit;
 		}
 	}
@@ -623,7 +643,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	walker.WalkAndResolveStack(&newImageLoadHistory->CallerStackHistory, &newImageLoadHistory->CallerStackHistorySize, STACK_HISTORY_TAG);
 	if (newImageLoadHistory->CallerStackHistory == NULL)
 	{
-		DBGPRINT("ImageHistoryFilter!LoadImageNotifyRoutine: Failed to allocate space for the stack history.");
+		DBGPRINT("ImageFilter!LoadImageNotifyRoutine: Failed to allocate space for the stack history.");
 		status = STATUS_NO_MEMORY;
 		goto Exit;
 	}
@@ -638,7 +658,7 @@ ImageHistoryFilter::LoadImageNotifyRoutine(
 	//
 	// Audit the stack.
 	//
-	ImageHistoryFilter::detector->AuditUserStackWalk(ImageLoad,
+	ImageFilter::detector->AuditUserStackWalk(ImageLoad,
 													 PsGetCurrentProcessId(),
 													 currentProcessHistory->ProcessImageFileName,
 													 &newImageLoadHistory->ImageFileName,
@@ -648,7 +668,7 @@ Exit:
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Clean up on failure.
@@ -678,7 +698,7 @@ Exit:
 	@return The actual number of summaries returned.
 */
 ULONG
-ImageHistoryFilter::GetProcessHistorySummary (
+ImageFilter::GetProcessHistorySummary (
 	_In_ ULONG SkipCount,
 	_Inout_ PPROCESS_SUMMARY_ENTRY ProcessSummaries,
 	_In_ ULONG MaxProcessSummaries
@@ -692,7 +712,7 @@ ImageHistoryFilter::GetProcessHistorySummary (
 	currentProcessIndex = 0;
 	actualFilledSummaries = 0;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return 0;
 	}
@@ -700,15 +720,15 @@ ImageHistoryFilter::GetProcessHistorySummary (
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
 	//
 	// Iterate histories for the MaxProcessSummaries processes after SkipCount processes.
 	//
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageHistoryFilter::ProcessHistoryHead->ListEntry.Flink);
-		while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead && actualFilledSummaries < MaxProcessSummaries)
+		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageFilter::ProcessHistoryHead->ListEntry.Flink);
+		while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead && actualFilledSummaries < MaxProcessSummaries)
 		{
 			if (currentProcessIndex >= SkipCount)
 			{
@@ -727,7 +747,7 @@ ImageHistoryFilter::GetProcessHistorySummary (
 					status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(&ProcessSummaries[actualFilledSummaries].ImageFileName), MAX_PATH * sizeof(WCHAR), currentProcessHistory->ProcessImageFileName);
 					if (NT_SUCCESS(status) == FALSE)
 					{
-						DBGPRINT("ImageHistoryFilter!GetProcessHistorySummary: Failed to copy the image file name with status 0x%X.", status);
+						DBGPRINT("ImageFilter!GetProcessHistorySummary: Failed to copy the image file name with status 0x%X.", status);
 						break;
 					}
 				}
@@ -741,7 +761,7 @@ ImageHistoryFilter::GetProcessHistorySummary (
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 
 	return actualFilledSummaries;
 }
@@ -751,7 +771,7 @@ ImageHistoryFilter::GetProcessHistorySummary (
 	@param ProcessDetailedRequest - The request to populate.
 */
 VOID
-ImageHistoryFilter::PopulateProcessDetailedRequest (
+ImageFilter::PopulateProcessDetailedRequest (
 	_Inout_ PPROCESS_DETAILED_REQUEST ProcessDetailedRequest
 	)
 {
@@ -762,7 +782,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 
 	i = 0;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return;
 	}
@@ -770,12 +790,12 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageHistoryFilter::ProcessHistoryHead->ListEntry.Blink);
-		while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead)
+		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageFilter::ProcessHistoryHead->ListEntry.Blink);
+		while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead)
 		{
 			if (ProcessDetailedRequest->ProcessId == currentProcessHistory->ProcessId &&
 				ProcessDetailedRequest->EpochExecutionTime == currentProcessHistory->EpochExecutionTime)
@@ -801,7 +821,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 					status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ProcessDetailedRequest->ProcessPath), MAX_PATH * sizeof(WCHAR), currentProcessHistory->ProcessImageFileName);
 					if (NT_SUCCESS(status) == FALSE)
 					{
-						DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the process with status 0x%X.", status);
+						DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the process with status 0x%X.", status);
 						break;
 					}
 				}
@@ -810,7 +830,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 					status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ProcessDetailedRequest->CallerProcessPath), MAX_PATH * sizeof(WCHAR), currentProcessHistory->CallerImageFileName);
 					if (NT_SUCCESS(status) == FALSE)
 					{
-						DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the caller with status 0x%X.", status);
+						DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the caller with status 0x%X.", status);
 						break;
 					}
 				}
@@ -819,7 +839,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 					status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ProcessDetailedRequest->ParentProcessPath), MAX_PATH * sizeof(WCHAR), currentProcessHistory->ParentImageFileName);
 					if (NT_SUCCESS(status) == FALSE)
 					{
-						DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the parent with status 0x%X.", status);
+						DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of the parent with status 0x%X.", status);
 						break;
 					}
 				}
@@ -828,7 +848,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 					status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ProcessDetailedRequest->ProcessCommandLine), MAX_PATH * sizeof(WCHAR), currentProcessHistory->ProcessCommandLine);
 					if (NT_SUCCESS(status) == FALSE)
 					{
-						DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Failed to copy the command line of the process with status 0x%X.", status);
+						DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Failed to copy the command line of the process with status 0x%X.", status);
 						break;
 					}
 				}
@@ -851,7 +871,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 							status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ProcessDetailedRequest->ImageSummary[i].ImagePath), MAX_PATH * sizeof(WCHAR), &currentImageEntry->ImageFileName);
 							if (NT_SUCCESS(status) == FALSE)
 							{
-								DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of an image with status 0x%X and source size %i.", status, currentImageEntry->ImageFileName.Length);
+								DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Failed to copy the image file name of an image with status 0x%X and source size %i.", status, currentImageEntry->ImageFileName.Length);
 								break;
 							}
 						}
@@ -859,7 +879,7 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 					}
 					__except (1)
 					{
-						DBGPRINT("ImageHistoryFilter!PopulateProcessDetailedRequest: Exception while processing image summaries.");
+						DBGPRINT("ImageFilter!PopulateProcessDetailedRequest: Exception while processing image summaries.");
 						break;
 					}
 					
@@ -880,50 +900,168 @@ ImageHistoryFilter::PopulateProcessDetailedRequest (
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 }
 
 /**
-	Populate a process sizes request.
-	@param ProcesSizesRequest - The request to populate.
+	Query a thread's start address for validation.
+	@param ThreadId - The target thread's ID.
+	@return The start address of the target thread.
 */
-VOID
-ImageHistoryFilter::PopulateProcessSizes (
-	_Inout_ PPROCESS_SIZES_REQUEST ProcessSizesRequest
+PVOID
+ImageFilter::GetThreadStartAddress(
+	_In_ HANDLE ThreadId
 	)
 {
-	PPROCESS_HISTORY_ENTRY currentProcessHistory;
+	NTSTATUS status;
+	PVOID startAddress;
+	PETHREAD threadObject;
+	HANDLE threadHandle;
+	ULONG returnLength;
 
-	if (ImageHistoryFilter::destroying)
+	startAddress = NULL;
+	threadHandle = NULL;
+
+	//
+	// First look up the PETHREAD of the thread.
+	//
+	status = PsLookupThreadByThreadId(ThreadId, &threadObject);
+	if (NT_SUCCESS(status) == FALSE)
+	{
+		DBGPRINT("ImageFilter!GetThreadStartAddress: Failed to lookup thread 0x%X by its ID.", ThreadId);
+		goto Exit;
+	}
+
+	//
+	// Open a handle to the thread.
+	//
+	status = ObOpenObjectByPointer(threadObject, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, GENERIC_ALL, *PsThreadType, KernelMode, &threadHandle);
+	if (NT_SUCCESS(status) == FALSE)
+	{
+		DBGPRINT("ImageFilter!GetThreadStartAddress: Failed to open handle to process with status 0x%X.", status);
+		goto Exit;
+	}
+
+	//
+	// Query the thread's start address.
+	//
+	status = NtQueryInformationThread(threadHandle, ThreadQuerySetWin32StartAddress, &startAddress, sizeof(startAddress), &returnLength);
+	if (NT_SUCCESS(status) == FALSE)
+	{
+		DBGPRINT("ImageFilter!GetThreadStartAddress: Failed to query thread start address with status 0x%X.", status);
+		goto Exit;
+	}
+Exit:
+	if (threadHandle != NULL)
+	{
+		ZwClose(threadHandle);
+	}
+	return startAddress;
+}
+
+/**
+	Called when a new thread is created. Ensure the thread is legit.
+	@param ProcessId - The process ID of the process receiving the new thread.
+	@param ThreadId - The thread ID of the new thread.
+	@param Create - Whether or not this is termination of a thread or creation.
+*/
+VOID
+ImageFilter::ThreadNotifyRoutine(
+	_In_ HANDLE ProcessId,
+	_In_ HANDLE ThreadId,
+	_In_ BOOLEAN Create
+	)
+{
+	ULONG processThreadCount;
+	PVOID threadStartAddress;
+	PSTACK_RETURN_INFO threadCreateStack;
+	ULONG threadCreateStackSize;
+	PUNICODE_STRING threadCallerName;
+	PUNICODE_STRING threadTargetName;
+
+	threadCreateStack = NULL;
+	threadCreateStackSize = 20;
+	threadCallerName = NULL;
+	threadTargetName = NULL;
+
+	//
+	// We don't really care about thread termination or if the thread is kernel-mode.
+	//
+	if (Create == FALSE || ExGetPreviousMode() == KernelMode)
 	{
 		return;
 	}
 
 	//
-	// Acquire a shared lock to iterate processes.
+	// If we can't find the process or it's the first thread of the process, skip it.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
-
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::AddProcessThreadCount(ProcessId, &processThreadCount) == FALSE ||
+		processThreadCount <= 1)
 	{
-		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageHistoryFilter::ProcessHistoryHead->ListEntry.Blink);
-		while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead)
-		{
-			if (ProcessSizesRequest->ProcessId == currentProcessHistory->ProcessId &&
-				ProcessSizesRequest->EpochExecutionTime == currentProcessHistory->EpochExecutionTime)
-			{
-				ProcessSizesRequest->StackSize = currentProcessHistory->CallerStackHistorySize;
-				ProcessSizesRequest->ImageSize = currentProcessHistory->ImageLoadHistorySize;
-				break;
-			}
-			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(currentProcessHistory->ListEntry.Blink);
-		}
+		return;
 	}
 
 	//
-	// Release the lock.
+	// Walk the stack.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	ImageFilter::walker.WalkAndResolveStack(&threadCreateStack, &threadCreateStackSize, STACK_HISTORY_TAG);
+
+	//
+	// Grab the name of the caller.
+	//
+	if (ImageFilter::GetProcessImageFileName(PsGetCurrentProcessId(), &threadCallerName) == FALSE)
+	{
+		goto Exit;
+	}
+
+	threadTargetName = threadCallerName;
+
+	//
+	// We only need to resolve again if the target process is a different than the caller.
+	//
+	if (PsGetCurrentProcessId() != ProcessId)
+	{
+		//
+		// Grab the name of the target.
+		//
+		if (ImageFilter::GetProcessImageFileName(ProcessId, &threadTargetName) == FALSE)
+		{
+			goto Exit;
+		}
+	}
+	
+	//
+	// Grab the start address of the thread.
+	//
+	threadStartAddress = ImageFilter::GetThreadStartAddress(ThreadId);
+
+	//
+	// Audit the target's start address.
+	//
+	ImageFilter::detector->AuditUserPointer(ThreadCreate, threadStartAddress, PsGetCurrentProcessId(), threadCallerName, threadTargetName, threadCreateStack, threadCreateStackSize);
+
+	//
+	// Audit the caller's stack.
+	//
+	ImageFilter::detector->AuditUserStackWalk(ThreadCreate, PsGetCurrentProcessId(), threadCallerName, threadTargetName, threadCreateStack, threadCreateStackSize);
+
+	//
+	// Check if this is a remote operation.
+	//
+	ImageFilter::detector->AuditCallerProcessId(ThreadCreate, PsGetCurrentProcessId(), ProcessId, threadCallerName, threadTargetName, threadCreateStack, threadCreateStackSize);
+Exit:
+	if (threadCreateStack != NULL)
+	{
+		ExFreePoolWithTag(threadCreateStack, STACK_HISTORY_TAG);
+	}
+	if (threadCallerName != NULL)
+	{
+		ExFreePoolWithTag(threadCallerName, IMAGE_NAME_TAG);
+	}
+	if (threadCallerName != threadTargetName && threadTargetName != NULL)
+	{
+		ExFreePoolWithTag(threadTargetName, IMAGE_NAME_TAG);
+	}
 }
 
 /**
@@ -933,7 +1071,7 @@ ImageHistoryFilter::PopulateProcessSizes (
 	@return Whether or not the process was found.
 */
 BOOLEAN
-ImageHistoryFilter::AddProcessThreadCount (
+ImageFilter::AddProcessThreadCount(
 	_In_ HANDLE ProcessId,
 	_Inout_ ULONG* ThreadCount
 	)
@@ -943,7 +1081,7 @@ ImageHistoryFilter::AddProcessThreadCount (
 
 	foundProcess = FALSE;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return foundProcess;
 	}
@@ -951,12 +1089,12 @@ ImageHistoryFilter::AddProcessThreadCount (
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageHistoryFilter::ProcessHistoryHead->ListEntry.Blink);
-		while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead)
+		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageFilter::ProcessHistoryHead->ListEntry.Blink);
+		while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead)
 		{
 			if (ProcessId == currentProcessHistory->ProcessId &&
 				currentProcessHistory->ProcessTerminated == FALSE)
@@ -973,13 +1111,60 @@ ImageHistoryFilter::AddProcessThreadCount (
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 
 	return foundProcess;
 }
 
+/**
+	Populate a process sizes request.
+	@param ProcessSizesRequest - The request to populate.
+*/
 VOID
-ImageHistoryFilter::PopulateImageDetailedRequest(
+ImageFilter::PopulateProcessSizes (
+	_Inout_ PPROCESS_SIZES_REQUEST ProcessSizesRequest
+	)
+{
+	PPROCESS_HISTORY_ENTRY currentProcessHistory;
+
+	if (ImageFilter::destroying)
+	{
+		return;
+	}
+
+	//
+	// Acquire a shared lock to iterate processes.
+	//
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
+
+	if (ImageFilter::ProcessHistoryHead)
+	{
+		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageFilter::ProcessHistoryHead->ListEntry.Blink);
+		while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead)
+		{
+			if (ProcessSizesRequest->ProcessId == currentProcessHistory->ProcessId &&
+				ProcessSizesRequest->EpochExecutionTime == currentProcessHistory->EpochExecutionTime)
+			{
+				ProcessSizesRequest->StackSize = currentProcessHistory->CallerStackHistorySize;
+				ProcessSizesRequest->ImageSize = currentProcessHistory->ImageLoadHistorySize;
+				break;
+			}
+			currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(currentProcessHistory->ListEntry.Blink);
+		}
+	}
+
+	//
+	// Release the lock.
+	//
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
+}
+
+/**
+	Populate an image detailed request.
+	@param ImageDetailedRequest - The request to populate.
+*/
+VOID
+ImageFilter::PopulateImageDetailedRequest(
 	_Inout_ PIMAGE_DETAILED_REQUEST ImageDetailedRequest
 	)
 {
@@ -990,7 +1175,7 @@ ImageHistoryFilter::PopulateImageDetailedRequest(
 
 	i = 0;
 
-	if (ImageHistoryFilter::destroying)
+	if (ImageFilter::destroying)
 	{
 		return;
 	}
@@ -998,12 +1183,12 @@ ImageHistoryFilter::PopulateImageDetailedRequest(
 	//
 	// Acquire a shared lock to iterate processes.
 	//
-	FltAcquirePushLockShared(&ImageHistoryFilter::ProcessHistoryLock);
+	FltAcquirePushLockShared(&ImageFilter::ProcessHistoryLock);
 
-	if (ImageHistoryFilter::ProcessHistoryHead)
+	if (ImageFilter::ProcessHistoryHead)
 	{
-		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageHistoryFilter::ProcessHistoryHead->ListEntry.Blink);
-		while (currentProcessHistory && currentProcessHistory != ImageHistoryFilter::ProcessHistoryHead)
+		currentProcessHistory = RCAST<PPROCESS_HISTORY_ENTRY>(ImageFilter::ProcessHistoryHead->ListEntry.Blink);
+		while (currentProcessHistory && currentProcessHistory != ImageFilter::ProcessHistoryHead)
 		{
 			if (ImageDetailedRequest->ProcessId == currentProcessHistory->ProcessId &&
 				ImageDetailedRequest->EpochExecutionTime == currentProcessHistory->EpochExecutionTime)
@@ -1026,7 +1211,7 @@ ImageHistoryFilter::PopulateImageDetailedRequest(
 							status = RtlStringCbCopyUnicodeString(RCAST<NTSTRSAFE_PWSTR>(ImageDetailedRequest->ImagePath), MAX_PATH * sizeof(WCHAR), &currentImageEntry->ImageFileName);
 							if (NT_SUCCESS(status) == FALSE)
 							{
-								DBGPRINT("ImageHistoryFilter!PopulateImageDetailedRequest: Failed to copy the image file name of an image with status 0x%X and source size %i.", status, currentImageEntry->ImageFileName.Length);
+								DBGPRINT("ImageFilter!PopulateImageDetailedRequest: Failed to copy the image file name of an image with status 0x%X and source size %i.", status, currentImageEntry->ImageFileName.Length);
 								break;
 							}
 						}
@@ -1053,5 +1238,5 @@ ImageHistoryFilter::PopulateImageDetailedRequest(
 	//
 	// Release the lock.
 	//
-	FltReleasePushLock(&ImageHistoryFilter::ProcessHistoryLock);
+	FltReleasePushLock(&ImageFilter::ProcessHistoryLock);
 }

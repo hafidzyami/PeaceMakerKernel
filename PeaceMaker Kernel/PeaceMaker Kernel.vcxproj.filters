@@ -47,13 +47,10 @@
     <ClCompile Include="common.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="RegistryFilter.cpp">
-      <Filter>Source Files\Filters</Filter>
-    </ClCompile>
     <ClCompile Include="StackWalker.cpp">
       <Filter>Source Files\Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="ImageHistoryFilter.cpp">
+    <ClCompile Include="ImageFilter.cpp">
       <Filter>Source Files\Filters</Filter>
     </ClCompile>
     <ClCompile Include="StringFilters.cpp">
@@ -68,10 +65,7 @@
     <ClCompile Include="AlertQueue.cpp">
       <Filter>Source Files\Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="ThreadFilter.cpp">
-      <Filter>Source Files\Filters</Filter>
-    </ClCompile>
-    <ClCompile Include="TamperGuard.cpp">
+    <ClCompile Include="ObjectFilter.cpp">
       <Filter>Source Files\Filters</Filter>
     </ClCompile>
   </ItemGroup>
@@ -79,16 +73,13 @@
     <ClInclude Include="common.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RegistryFilter.h">
-      <Filter>Header Files\Filters</Filter>
-    </ClInclude>
     <ClInclude Include="StackWalker.h">
       <Filter>Header Files\Utilities</Filter>
     </ClInclude>
     <ClInclude Include="ntdef.h">
       <Filter>Header Files\Utilities</Filter>
     </ClInclude>
-    <ClInclude Include="ImageHistoryFilter.h">
+    <ClInclude Include="ImageFilter.h">
       <Filter>Header Files\Filters</Filter>
     </ClInclude>
     <ClInclude Include="StringFilters.h">
@@ -105,12 +96,6 @@
     </ClInclude>
     <ClInclude Include="IOCTLCommunication.h">
       <Filter>Header Files\Core</Filter>
-    </ClInclude>
-    <ClInclude Include="ThreadFilter.h">
-      <Filter>Header Files\Filters</Filter>
-    </ClInclude>
-    <ClInclude Include="TamperGuard.h">
-      <Filter>Header Files\Filters</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

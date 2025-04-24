@@ -8,10 +8,8 @@
 
 PDRIVER_OBJECT IOCTLCommunication::DriverObject;
 PDETECTION_LOGIC IOCTLCommunication::Detector;
-PIMAGE_HISTORY_FILTER IOCTLCommunication::ImageProcessFilter;
-PREGISTRY_BLOCKING_FILTER IOCTLCommunication::RegistryMonitor;
-PTHREAD_FILTER IOCTLCommunication::ThreadOperationFilter;
-PTAMPER_GUARD IOCTLCommunication::TamperGuardFilter;
+PIMAGE_FILTER IOCTLCommunication::ImageProcessFilter;
+POBJECT_FILTER IOCTLCommunication::ObjectMonitor;
 
 /**
 	Construct the IOCTLCommunication class by initializing the driver object and detector.
@@ -44,7 +42,7 @@ IOCTLCommunication::IOCTLCommunication (
 		return;
 	}
 
-	this->ImageProcessFilter = new (NonPagedPool, IMAGE_HISTORY_FILTER_TAG) ImageHistoryFilter(this->Detector, InitializeStatus);
+	this->ImageProcessFilter = new (NonPagedPool, IMAGE_FILTER_TAG) ImageFilter(this->Detector, InitializeStatus);
 	if (NT_SUCCESS(*InitializeStatus) == FALSE)
 	{
 		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to initialize image process history filter with status 0x%X.", *InitializeStatus);
@@ -57,32 +55,19 @@ IOCTLCommunication::IOCTLCommunication (
 		return;
 	}
 
-	RegistryMonitor = new (NonPagedPool, REGISTRY_MONITOR_TAG) RegistryBlockingFilter(DriverObject, RegistryPath, this->Detector, InitializeStatus);
+	this->ObjectMonitor = new (NonPagedPool, OBJECT_FILTER_TAG) ObjectFilter(DriverObject, RegistryPath, this->Detector, InitializeStatus);
 	if (NT_SUCCESS(*InitializeStatus) == FALSE)
 	{
-		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to initialize the registry blocking filter with status 0x%X.", *InitializeStatus);
+		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to initialize object filter with status 0x%X.", *InitializeStatus);
 		return;
 	}
-
-	this->ThreadOperationFilter = new (NonPagedPool, THREAD_FILTER_TAG) ThreadFilter(this->Detector, InitializeStatus);
-	if (NT_SUCCESS(*InitializeStatus) == FALSE)
+	if (this->ObjectMonitor == NULL)
 	{
-		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to initialize thread operation filters with status 0x%X.", *InitializeStatus);
-		return;
-	}
-	if (this->ThreadOperationFilter == NULL)
-	{
-		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to allocate space for thread operation filters.");
+		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to allocate space for object filter.");
 		*InitializeStatus = STATUS_NO_MEMORY;
 		return;
 	}
 
-	this->TamperGuardFilter = new (NonPagedPool, TAMPER_GUARD_TAG) TamperGuard(InitializeStatus);
-	if (NT_SUCCESS(*InitializeStatus) == FALSE)
-	{
-		DBGPRINT("IOCTLCommunication!IOCTLCommunication: Failed to initialize tamper guard with status 0x%X.", *InitializeStatus);
-		return;
-	}
 
 	InitializeDriverIOCTL();
 }
@@ -97,17 +82,11 @@ IOCTLCommunication::~IOCTLCommunication	(
 	this->Detector->~DetectionLogic();
 	ExFreePoolWithTag(this->Detector, DETECTION_LOGIC_TAG);
 
-	this->ImageProcessFilter->~ImageHistoryFilter();
-	ExFreePoolWithTag(this->ImageProcessFilter, IMAGE_HISTORY_FILTER_TAG);
+	this->ImageProcessFilter->~ImageFilter();
+	ExFreePoolWithTag(this->ImageProcessFilter, IMAGE_FILTER_TAG);
 
-	this->RegistryMonitor->~RegistryBlockingFilter();
-	ExFreePoolWithTag(this->RegistryMonitor, REGISTRY_MONITOR_TAG);
-
-	this->ThreadOperationFilter->~ThreadFilter();
-	ExFreePoolWithTag(this->ThreadOperationFilter, THREAD_FILTER_TAG);
-
-	this->TamperGuardFilter->~TamperGuard();
-	ExFreePoolWithTag(this->TamperGuardFilter, TAMPER_GUARD_TAG);
+	this->ObjectMonitor->~ObjectFilter();
+	ExFreePoolWithTag(this->ObjectMonitor, OBJECT_FILTER_TAG);
 
 	UninitializeDriverIOCTL();
 }
@@ -183,7 +162,7 @@ IOCTLCommunication::IOCTLDeviceControl (
 	//
 	// Update the tamper guard.
 	//
-	IOCTLCommunication::TamperGuardFilter->UpdateProtectedProcess(PsGetCurrentProcessId());
+	IOCTLCommunication::ObjectMonitor->UpdateProtectedProcess(PsGetCurrentProcessId());
 
 	DBGPRINT("IOCTLCommunication!IOCTLDeviceControl: ioctlCode = %lu, inputLength = %lu, outputLength = %lu", ioctlCode, inputLength, outputLength);
 
@@ -347,7 +326,7 @@ IOCTLCommunication::IOCTLDeviceControl (
 		switch (filterAddRequest->FilterType)
 		{
 		case RegistryFilter:
-			filterAddRequest->Filter.Id = RegistryMonitor->GetStringFilters()->AddFilter(temporaryFilterBuffer, filterAddRequest->Filter.Flags);
+			filterAddRequest->Filter.Id = ObjectMonitor->GetRegistryStringFilters()->AddFilter(temporaryFilterBuffer, filterAddRequest->Filter.Flags);
 			break;
 		}
 		writtenLength = sizeof(STRING_FILTER_REQUEST);
@@ -374,7 +353,7 @@ IOCTLCommunication::IOCTLDeviceControl (
 		{
 		case RegistryFilter:
 			DBGPRINT("IOCTLCommunication!IOCTLDeviceControl: Retrieving registry filters.");
-			listFiltersRequest->CopiedFilters = RegistryMonitor->GetStringFilters()->GetFilters(listFiltersRequest->SkipFilters, RCAST<PFILTER_INFO>(&listFiltersRequest->Filters), 10);
+			listFiltersRequest->CopiedFilters = ObjectMonitor->GetRegistryStringFilters()->GetFilters(listFiltersRequest->SkipFilters, RCAST<PFILTER_INFO>(&listFiltersRequest->Filters), 10);
 			break;
 		}
 		writtenLength = sizeof(LIST_FILTERS_REQUEST);
@@ -441,8 +420,8 @@ IOCTLCommunication::IOCTLDeviceControl (
 		}
 
 		globalSizes = RCAST<PGLOBAL_SIZES>(Irp->AssociatedIrp.SystemBuffer);
-		globalSizes->ProcessHistorySize = ImageHistoryFilter::ProcessHistorySize;
-		globalSizes->RegistryFilterSize = RegistryMonitor->GetStringFilters()->filtersCount;
+		globalSizes->ProcessHistorySize = ImageFilter::ProcessHistorySize;
+		globalSizes->RegistryFilterSize = ObjectMonitor->GetRegistryStringFilters()->filtersCount;
 		writtenLength = sizeof(GLOBAL_SIZES);
 		break;
 	case IOCTL_DELETE_FILTER:
@@ -460,7 +439,7 @@ IOCTLCommunication::IOCTLDeviceControl (
 		switch (deleteFilterRequest->FilterType)
 		{
 		case RegistryFilter:
-			deleteFilterRequest->Deleted = RegistryMonitor->GetStringFilters()->RemoveFilter(deleteFilterRequest->FilterId);
+			deleteFilterRequest->Deleted = ObjectMonitor->GetRegistryStringFilters()->RemoveFilter(deleteFilterRequest->FilterId);
 			break;
 		}
 		writtenLength = sizeof(DELETE_FILTER_REQUEST);

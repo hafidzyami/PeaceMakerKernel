@@ -55,9 +55,9 @@ typedef struct ProcessHistoryEntry
 	ULONG ImageLoadHistorySize;					// The size of the image load history linked-list.
 } PROCESS_HISTORY_ENTRY, *PPROCESS_HISTORY_ENTRY;
 
-typedef class ImageHistoryFilter
+typedef class ImageFilter
 {
-
+	// Image History Filter components
 	static VOID CreateProcessNotifyRoutine (
 		_In_ PEPROCESS Process,
 		_In_ HANDLE ProcessId,
@@ -84,14 +84,27 @@ typedef class ImageHistoryFilter
 	static VOID TerminateProcessInHistory(
 		_In_ HANDLE ProcessId
 		);
+    
+    // Thread Filter components
+	static PVOID GetThreadStartAddress(
+		_In_ HANDLE ThreadId
+		);
+
+	static VOID ThreadNotifyRoutine(
+		HANDLE ProcessId,
+		HANDLE ThreadId,
+		BOOLEAN Create
+		);
 
 public:
-	ImageHistoryFilter(
+	// Constructor & Destructor
+	ImageFilter(
 		_In_ PDETECTION_LOGIC Detector,
 		_Out_ NTSTATUS* InitializeStatus
 		);
-	~ImageHistoryFilter(VOID);
+	~ImageFilter(VOID);
 
+	// Image History Filter public methods
 	static BOOLEAN GetProcessImageFileName(
 		_In_ HANDLE ProcessId,
 		_Inout_ PUNICODE_STRING* ImageFileName
@@ -120,4 +133,4 @@ public:
 		_Inout_ ULONG* ThreadCount
 		);
 	static ULONG64 ProcessHistorySize;					// Number of entries in the ProcessHistory linked-list.
-} IMAGE_HISTORY_FILTER, *PIMAGE_HISTORY_FILTER;
+} IMAGE_FILTER, *PIMAGE_FILTER;

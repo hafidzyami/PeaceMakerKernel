@@ -37,8 +37,8 @@
   <ItemGroup>
     <ResourceCompile Include="PeaceMaker Kernel.rc" />
     <ClCompile Include="common.cpp" />
-    <ClCompile Include="ImageHistoryFilter.cpp" />
-    <ClCompile Include="RegistryFilter.cpp" />
+    <ClCompile Include="ImageFilter.cpp" />
+    <ClCompile Include="ObjectFilter.cpp" />
     <ClCompile Include="StackWalker.cpp" />
     <ClCompile Include="StringFilters.cpp" />
     <ClCompile Include="FilterTesting.cpp" />
@@ -192,8 +192,8 @@
   <ItemGroup>
     <ClInclude Include="common.h" />
     <ClInclude Include="ntdef.h" />
-    <ClInclude Include="ImageHistoryFilter.h" />
-    <ClInclude Include="RegistryFilter.h" />
+    <ClInclude Include="ImageFilter.h" />
+    <ClInclude Include="ObjectFilter.h" />
     <ClInclude Include="StackWalker.h" />
     <ClInclude Include="StringFilters.h" />
   </ItemGroup>

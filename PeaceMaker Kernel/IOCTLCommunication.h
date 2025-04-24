@@ -7,19 +7,15 @@
 #pragma once
 #include "common.h"
 #include "DetectionLogic.h"
-#include "ImageHistoryFilter.h"
-#include "ThreadFilter.h"
-#include "RegistryFilter.h"
-#include "TamperGuard.h"
+#include "ImageFilter.h"
+#include "ObjectFilter.h"
 
 typedef class IOCTLCommunication
 {
 	static PDRIVER_OBJECT DriverObject;
 	static PDETECTION_LOGIC Detector;
-	static PIMAGE_HISTORY_FILTER ImageProcessFilter;
-	static PREGISTRY_BLOCKING_FILTER RegistryMonitor;
-	static PTHREAD_FILTER ThreadOperationFilter;
-	static PTAMPER_GUARD TamperGuardFilter;
+	static PIMAGE_FILTER ImageProcessFilter;
+	static POBJECT_FILTER ObjectMonitor;
 
 	NTSTATUS InitializeDriverIOCTL(VOID);
 	VOID UninitializeDriverIOCTL(VOID);
@@ -44,7 +40,5 @@ public:
 } IOCTL_COMMUNICATION, *PIOCTL_COMMUNICATION;
 
 #define DETECTION_LOGIC_TAG 'lDmP'
-#define IMAGE_HISTORY_FILTER_TAG 'fImP'
-#define REGISTRY_MONITOR_TAG 'mRmP'
-#define THREAD_FILTER_TAG 'fTmP'
-#define TAMPER_GUARD_TAG 'gTmP'
+#define IMAGE_FILTER_TAG 'fImP'
+#define OBJECT_FILTER_TAG 'fOmP'

@@ -35,15 +35,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="TamperGuard.cpp" />
-    <ClCompile Include="ThreadFilter.cpp" />
+    <ClCompile Include="ObjectFilter.cpp" />
+
     <ResourceCompile Include="PeaceMaker Kernel.rc" />
     <ClCompile Include="AlertQueue.cpp" />
     <ClCompile Include="common.cpp" />
     <ClCompile Include="DetectionLogic.cpp" />
-    <ClCompile Include="ImageHistoryFilter.cpp" />
+    <ClCompile Include="ImageFilter.cpp" />
     <ClCompile Include="IOCTLCommunication.cpp" />
-    <ClCompile Include="RegistryFilter.cpp" />
+
     <ClCompile Include="StackWalker.cpp" />
     <ClCompile Include="StringFilters.cpp" />
     <ClCompile Include="FilterTesting.cpp" />
@@ -209,13 +209,13 @@
     <ClInclude Include="DetectionLogic.h" />
     <ClInclude Include="IOCTLCommunication.h" />
     <ClInclude Include="ntdef.h" />
-    <ClInclude Include="ImageHistoryFilter.h" />
-    <ClInclude Include="RegistryFilter.h" />
+    <ClInclude Include="ImageFilter.h" />
+    <ClInclude Include="ObjectFilter.h" />
     <ClInclude Include="shared.h" />
     <ClInclude Include="StackWalker.h" />
     <ClInclude Include="StringFilters.h" />
-    <ClInclude Include="TamperGuard.h" />
-    <ClInclude Include="ThreadFilter.h" />
+
+
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
